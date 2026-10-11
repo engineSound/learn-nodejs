@@ -8,16 +8,24 @@ everything so a tutor (Claude) can adapt to me.
 ## Parts
 
 ```
-browser ──► Fastify server ──► runner (child process, node --test, 10 s timeout)
+browser ──► node:http server ──► runner (child process, node --test, 10 s timeout)
                  │
                  ├──► SQLite: data/history.db  (event log, see SHARED-FORMAT.md)
                  ├──► profile builder → data/profile.md
                  └──► tutor: Claude API (profile + lesson + my code + test output)
 ```
 
-- **Web UI:** server-rendered pages plus a code editor (CodeMirror). No build step.
-- **Runner:** writes my code to a temp copy of the lesson folder and runs
-  `node --test` in a child process with a timeout. Results come back as JSON.
+- **No dependencies.** The server uses only Node's built-in modules, so
+  there's no `npm install` and nothing to update. (Fastify comes later as a
+  lesson, not as plumbing.)
+- **Web UI** (`app/public/`, shared with `learn-rust`): plain HTML, CSS and
+  JS. A textarea editor with line numbers, a small Markdown renderer for
+  lessons, and a results panel. Works offline.
+- **Runner** (`app/runner.js`): copies the lesson to a temp folder, writes my
+  code into the `edit:` file, runs `node --test --test-reporter=tap` in a
+  child process with a 10 s timeout, and parses the TAP output into JSON.
+- **Server** (`app/server.js`): the API in `docs/SHARED-FORMAT.md`. Listens
+  on 127.0.0.1 only unless `HOST` is set.
 - **History:** append-only `events` table; everything else is derived.
 - **Profile builder:** after each session, recomputes per-concept mastery and
   review dates (spaced repetition) and writes `data/profile.md`.
@@ -26,7 +34,7 @@ browser ──► Fastify server ──► runner (child process, node --test, 1
   API key in `.env` (`ANTHROPIC_API_KEY`), never committed.
 
 ## Running it
-- **Mac (now):** `npm install && npm start`, open http://localhost:3000.
+- **Mac (now):** `npm start`, open http://localhost:3000.
 - **AWS (later):** the same app in a Docker container on an existing EC2
   instance, behind HTTPS and a login, because it runs code.
 

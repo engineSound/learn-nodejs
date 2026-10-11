@@ -4,6 +4,8 @@
   "type": "module",
   "engines": { "node": ">=22" },
   "scripts": {
-    "test": "node --test lessons/"
+    "start": "node app/server.js",
+    "dev": "node --watch app/server.js",
+    "test": "node --test \"app/**/*.test.js\""
   }
 }

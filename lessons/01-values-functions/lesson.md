@@ -6,6 +6,7 @@ minutes: 20
 concepts: [equality, let-const, arrow-functions, array-methods]
 prereqs: []
 contrast: java
+edit: exercise.js
 ---
 
 # Values, equality and functions

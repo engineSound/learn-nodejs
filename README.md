@@ -10,24 +10,30 @@ so they can merge into one multi-language tutor later.
 ## Status
 
 - [x] Lesson format, history format, roadmap
-- [x] Lesson 01 (works from the command line today)
-- [ ] Web app: lesson list, editor, Run button → test results
+- [x] Lesson 01
+- [x] Web app (M1): lesson list, editor, Run button → test results in well under a second
 - [ ] History database + learner profile
 - [ ] Tutor (Claude API) reading the profile
 - [ ] Docker setup; deploy to AWS
 
-## Doing a lesson today, before the app exists
+## Start the app
 
-Needs Node 22 or later.
+Needs Node 22 or later. There's nothing to install: the app uses only Node's
+built-in modules.
 
 ```sh
-cd lessons/01-values-functions
-cat lesson.md            # read (~5 min)
-$EDITOR exercise.js      # fill in the TODOs
-node --test              # run the tests; repeat until green
+npm start                # then open http://localhost:3000
 ```
 
-Then add a line to [PROGRESS.md](PROGRESS.md).
+Pick a lesson, read it on the left, write code on the right, and press
+**Ctrl+Enter** (or **⌘+Enter**) to run the tests. Your code is saved as you
+type, in `data/work/` (not committed). After a lesson, add a line to
+[PROGRESS.md](PROGRESS.md).
+
+`npm run dev` restarts the server when its code changes. `npm test` tests the
+app itself (lesson tests are meant to fail until you solve them).
+
+Without the app: `cd lessons/01-values-functions && node --test`.
 
 ## Docs
 

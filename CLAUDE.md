@@ -16,3 +16,7 @@ Teaching rules:
   against a reference solution before committing (do not commit the solution).
 
 Tech: Node 22+, ESM (`"type": "module"`), `node:test` for tests.
+
+App: `app/` (server, lesson loader, test runner; no npm dependencies, keep it
+that way unless there's a strong reason). `app/public/` is shared byte-for-byte
+with `learn-rust`. Check with `npm test`, then run `npm start` and try a lesson.
