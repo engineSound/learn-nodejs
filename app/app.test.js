@@ -78,3 +78,29 @@ export const makeMultiplier = factor => x => x * factor;`;
   assert.ok(r.total >= 9);
   assert.equal(fs.existsSync(lesson.dir + '/package.json'), false, 'runner must not write into the lesson folder');
 });
+
+test('history: append, read back, skip a torn line, compute stats', async () => {
+  const { appendEvent, readEvents, lessonStats, runPayload } = await import('./history.js');
+  const os = await import('node:os');
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'learn-hist-')), 'events.jsonl');
+  const fail = { passed: 2, failed: 1, total: 3, tests: [{ name: 'a', ok: true }, { name: 'b', ok: true }, { name: 'c', ok: false }], compileErrors: [], timedOut: false };
+  const pass = { ...fail, passed: 3, failed: 0, tests: fail.tests.map(t => ({ ...t, ok: true })) };
+
+  assert.deepEqual(lessonStats([], 'x'), { runs: 0, first_pass_run: null, last_result: null, last_ts: null, best_passed: 0, total: null });
+  appendEvent(file, { track: 'nodejs', lesson_id: 'x', kind: 'lesson_open' });
+  appendEvent(file, { track: 'nodejs', lesson_id: 'x', kind: 'fail', payload: runPayload(fail, 'code 1') });
+  appendEvent(file, { track: 'nodejs', lesson_id: 'other', kind: 'pass', payload: runPayload(pass, '') });
+  appendEvent(file, { track: 'nodejs', lesson_id: 'x', kind: 'pass', payload: runPayload(pass, 'code 2') });
+  fs.appendFileSync(file, '{"ts":"broken');
+
+  const events = readEvents(file);
+  assert.equal(events.length, 4);
+  assert.deepEqual(Object.keys(events[0]), ['ts', 'track', 'lesson_id', 'concept', 'kind', 'duration_ms', 'payload']);
+  assert.deepEqual(events[1].payload.failing, ['c']);
+  const st = lessonStats(events, 'x');
+  assert.equal(st.runs, 2);
+  assert.equal(st.first_pass_run, 2);
+  assert.equal(st.last_result, 'pass');
+  assert.equal(st.best_passed, 3);
+  assert.equal(st.total, 3);
+});

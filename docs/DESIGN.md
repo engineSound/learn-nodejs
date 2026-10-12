@@ -10,7 +10,7 @@ everything so a tutor (Claude) can adapt to me.
 ```
 browser ──► node:http server ──► runner (child process, node --test, 10 s timeout)
                  │
-                 ├──► SQLite: data/history.db  (event log, see SHARED-FORMAT.md)
+                 ├──► data/events.jsonl  (event log, see SHARED-FORMAT.md)
                  ├──► profile builder → data/profile.md
                  └──► tutor: Claude API (profile + lesson + my code + test output)
 ```
@@ -26,7 +26,10 @@ browser ──► node:http server ──► runner (child process, node --test,
   child process with a 10 s timeout, and parses the TAP output into JSON.
 - **Server** (`app/server.js`): the API in `docs/SHARED-FORMAT.md`. Listens
   on 127.0.0.1 only unless `HOST` is set.
-- **History:** append-only `events` table; everything else is derived.
+- **History** (`app/history.js`): every lesson open and every run is
+  appended to `data/events.jsonl`; per-lesson stats are derived from it on
+  each request. The file lives only on the machine running the app (it's
+  gitignored). The learner profile (M3) is the summary that gets committed.
 - **Profile builder:** after each session, recomputes per-concept mastery and
   review dates (spaced repetition) and writes `data/profile.md`.
 - **Tutor:** called only when I ask for a hint or explanation, or after

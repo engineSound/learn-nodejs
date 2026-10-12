@@ -55,7 +55,7 @@ is the `learn-rust` capstone, so you can compare the two languages directly.
 | Milestone | What you get |
 |-----------|--------------|
 | M1 ✅ | Website lists lessons; editor; **Run** shows test results in seconds |
-| M2 | Every run, pass, fail and question saved to the history database |
+| M2 ✅ | Every run, pass and fail saved to the history log (`data/events.jsonl`) |
 | M3 | Learner profile generated after each session; review items scheduled |
 | M4 | Tutor: explanations and hints from Claude, aware of your profile |
 | M5 | Docker; deploy to an existing EC2 instance behind a login |

@@ -6,10 +6,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listLessons, loadLesson } from './lessons.js';
 import { runLesson } from './runner.js';
+import { appendEvent, readEvents, runPayload, lessonStats } from './history.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LESSONS = path.join(ROOT, 'lessons');
 const WORK = path.join(ROOT, 'data', 'work');
+const EVENTS = process.env.LEARN_EVENTS || path.join(ROOT, 'data', 'events.jsonl');
 const PUBLIC = path.join(ROOT, 'app', 'public');
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -53,7 +55,10 @@ async function handle(req, res) {
   const p = url.pathname;
 
   if (req.method === 'GET' && p === '/api/info') return send(res, 200, INFO);
-  if (req.method === 'GET' && p === '/api/lessons') return send(res, 200, listLessons(LESSONS));
+  if (req.method === 'GET' && p === '/api/lessons') {
+    const events = readEvents(EVENTS);
+    return send(res, 200, listLessons(LESSONS).map(l => ({ ...l, stats: lessonStats(events, l.id) })));
+  }
 
   const m = /^\/api\/lessons\/([^/]+)(\/code|\/run)?$/.exec(p);
   if (m) {
@@ -62,7 +67,9 @@ async function handle(req, res) {
     const action = m[2] || '';
     if (req.method === 'GET' && action === '') {
       const saved = savedCode(lesson);
-      return send(res, 200, { slug: lesson.slug, meta: lesson.meta, body: lesson.body, file: lesson.file, code: saved ?? lesson.starter, saved: saved !== null });
+      appendEvent(EVENTS, { track: INFO.track, lesson_id: lesson.meta.id, kind: 'lesson_open' });
+      const stats = lessonStats(readEvents(EVENTS), lesson.meta.id);
+      return send(res, 200, { slug: lesson.slug, meta: lesson.meta, body: lesson.body, file: lesson.file, code: saved ?? lesson.starter, saved: saved !== null, stats });
     }
     if (req.method === 'PUT' && action === '/code') {
       saveCode(lesson, await readBody(req));
@@ -70,12 +77,22 @@ async function handle(req, res) {
     }
     if (req.method === 'DELETE' && action === '/code') {
       fs.rmSync(workPath(lesson), { force: true });
+      appendEvent(EVENTS, { track: INFO.track, lesson_id: lesson.meta.id, kind: 'reset' });
       return send(res, 200, { code: lesson.starter });
     }
     if (req.method === 'POST' && action === '/run') {
       const code = await readBody(req);
       saveCode(lesson, code);
-      return send(res, 200, await runLesson(lesson, code));
+      const result = await runLesson(lesson, code);
+      const allPass = result.total > 0 && result.failed === 0 && result.compileErrors.length === 0 && !result.timedOut;
+      appendEvent(EVENTS, {
+        track: INFO.track,
+        lesson_id: lesson.meta.id,
+        kind: allPass ? 'pass' : 'fail',
+        duration_ms: result.durationMs,
+        payload: runPayload(result, code),
+      });
+      return send(res, 200, { ...result, stats: lessonStats(readEvents(EVENTS), lesson.meta.id) });
     }
     return send(res, 405, { error: 'Method not allowed' });
   }
