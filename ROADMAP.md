@@ -13,8 +13,9 @@ known ideas go fast and time goes to what's actually different.
 
 ### Module 1: Node.js from scratch (weeks 1–3), built ✅
 One practical skill per exercise (~8–12 min), in a running story: the backend
-for a small fleet of home devices. Each has a runnable example, a quick check,
-the exercise and three hints.
+for a small fleet of home devices. Each has an animated step-through visual
+(including what goes wrong), a runnable example, a quick check, the exercise
+and three hints.
 
 | # | Exercise | Skill | Key difference from Java |
 |---|----------|-------|--------------------------|

@@ -20,6 +20,257 @@ Devices send readings as JSON text, like `{"device":"thermostat","value":21.5}`.
 - Broken JSON makes `JSON.parse` **throw** a `SyntaxError`. Catch it with `try { … } catch (err) { … }`. As in Java, but there are no checked exceptions and no `throws` clause, so nothing reminds you.
 - Reading a missing property gives `undefined` (no exception). `typeof x === 'number'` checks a type at runtime.
 
+```visual
+{
+ "title": "From text to object, and what happens when it breaks",
+ "regions": [
+  {
+   "id": "text",
+   "label": "Text that arrived"
+  },
+  {
+   "id": "parse",
+   "label": "JSON.parse"
+  },
+  {
+   "id": "res",
+   "label": "Your code gets"
+  }
+ ],
+ "scenarios": [
+  {
+   "name": "A good message",
+   "group": "How it works",
+   "code": "const msg = JSON.parse('{\"device\":\"fan\",\"value\":3}');\nconsole.log(msg.device, msg.value, msg.battery);",
+   "check": {
+    "output": "fan 3 undefined"
+   },
+   "steps": [
+    {
+     "line": 1,
+     "say": "A device sends **text**. Until you parse it, it's just characters.",
+     "set": [
+      {
+       "id": "t",
+       "in": "text",
+       "title": "'{\"device\":\"fan\",\"value\":3}'",
+       "tag": "string"
+      }
+     ]
+    },
+    {
+     "line": 1,
+     "say": "`JSON.parse` reads the text and builds a plain object. No classes, no Jackson annotations.",
+     "rule": "`JSON.parse` turns text into objects; `JSON.stringify` goes back.",
+     "set": [
+      {
+       "id": "t",
+       "state": "faded"
+      },
+      {
+       "id": "p",
+       "in": "parse",
+       "title": "JSON.parse(…)",
+       "tag": "ok",
+       "state": "ok"
+      }
+     ],
+     "arrows": [
+      {
+       "from": "t",
+       "to": "p",
+       "state": "muted"
+      }
+     ]
+    },
+    {
+     "line": 1,
+     "say": "You get an object with the same fields and JSON types: `value` is a number.",
+     "set": [
+      {
+       "id": "p",
+       "state": "faded"
+      },
+      {
+       "id": "o",
+       "in": "res",
+       "title": "msg",
+       "value": "{ device: \"fan\", value: 3 }",
+       "tag": "object",
+       "state": "ok"
+      }
+     ],
+     "arrows": [
+      {
+       "from": "p",
+       "to": "o",
+       "state": "ok"
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "say": "Reading a missing field doesn't throw: you get `undefined`.",
+     "rule": "Missing properties are `undefined`; check them yourself.",
+     "set": [
+      {
+       "id": "m",
+       "in": "res",
+       "title": "msg.battery",
+       "value": "undefined",
+       "state": "active"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Broken JSON",
+   "group": "What if it goes wrong",
+   "code": "try {\n  JSON.parse(\"{oops\");\n} catch (err) {\n  console.log(err.name);\n}",
+   "check": {
+    "output": "SyntaxError"
+   },
+   "steps": [
+    {
+     "line": 2,
+     "say": "A message arrives half-written.",
+     "set": [
+      {
+       "id": "t",
+       "in": "text",
+       "title": "\"{oops\"",
+       "tag": "string",
+       "state": "bad"
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "say": "`JSON.parse` can't read it and **throws** a `SyntaxError`.",
+     "rule": "There are no checked exceptions: nothing forces you to catch it.",
+     "set": [
+      {
+       "id": "p",
+       "in": "parse",
+       "title": "JSON.parse(…)",
+       "tag": "throws SyntaxError",
+       "state": "bad"
+      }
+     ],
+     "arrows": [
+      {
+       "from": "t",
+       "to": "p",
+       "state": "bad"
+      }
+     ],
+     "error": "SyntaxError: Expected property name"
+    },
+    {
+     "line": 3,
+     "say": "Without `try`, the error would stop your service. With `catch`, you decide what happens.",
+     "rule": "Wrap parsing of untrusted text in `try { … } catch { … }`.",
+     "set": [
+      {
+       "id": "c",
+       "in": "res",
+       "title": "catch (err)",
+       "tag": "handled",
+       "state": "ok"
+      }
+     ],
+     "arrows": [
+      {
+       "from": "p",
+       "to": "c",
+       "label": "thrown",
+       "state": "bad",
+       "style": "solid"
+      }
+     ]
+    },
+    {
+     "line": 4,
+     "say": "Here we print the error's name; in the exercise you return `null`.",
+     "set": [
+      {
+       "id": "c",
+       "value": "\"SyntaxError\""
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "A number sent as text",
+   "group": "What if it goes wrong",
+   "code": "const msg = JSON.parse('{\"device\":\"fan\",\"value\":\"3\"}');\nconsole.log(typeof msg.value);",
+   "check": {
+    "output": "string"
+   },
+   "steps": [
+    {
+     "line": 1,
+     "say": "The quotes around `\"3\"` matter in JSON.",
+     "set": [
+      {
+       "id": "t",
+       "in": "text",
+       "title": "'{…\"value\":\"3\"}'",
+       "tag": "string"
+      }
+     ]
+    },
+    {
+     "line": 1,
+     "say": "Parsing works: the JSON is valid.",
+     "set": [
+      {
+       "id": "p",
+       "in": "parse",
+       "title": "JSON.parse(…)",
+       "tag": "ok",
+       "state": "ok"
+      }
+     ],
+     "arrows": [
+      {
+       "from": "t",
+       "to": "p",
+       "state": "muted"
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "say": "But `value` is the **string** `\"3\"`, so `typeof` says `string`.",
+     "rule": "Valid JSON isn't the same as the data you expect: check the types.",
+     "set": [
+      {
+       "id": "o",
+       "in": "res",
+       "title": "msg.value",
+       "value": "\"3\"",
+       "tag": "string",
+       "state": "bad"
+      }
+     ],
+     "arrows": [
+      {
+       "from": "p",
+       "to": "o",
+       "state": "bad"
+      }
+     ],
+     "error": "typeof msg.value is \"string\", not \"number\""
+    }
+   ]
+  }
+ ]
+}
+```
+
 ```run
 for (const text of ['{"device":"fan","value":3}', '{oops']) {
   try {
