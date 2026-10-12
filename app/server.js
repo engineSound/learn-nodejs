@@ -8,7 +8,7 @@ import { listLessons, loadLesson } from './lessons.js';
 import { runLesson, runSnippet } from './runner.js';
 import { appendEvent, readEvents, runPayload, lessonStats } from './history.js';
 import { buildProfile, profileMarkdown, writeProgress } from './profile.js';
-import { tutorStatus, hint, visualizeRun, generateDrill, drillTarget, learnerSection, setClientForTests } from './tutor.js';
+import { loadEnvFile, tutorStatus, hint, visualizeRun, generateDrill, drillTarget, learnerSection, setClientForTests } from './tutor.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LESSONS = path.join(ROOT, 'lessons');
@@ -18,7 +18,7 @@ const PROGRESS = process.env.LEARN_PROGRESS || path.join(ROOT, 'PROGRESS.md');
 const DATA = path.join(ROOT, 'data');
 
 // ANTHROPIC_API_KEY for the tutor lives in .env (gitignored); see .env.example.
-try { process.loadEnvFile(path.join(ROOT, '.env')); } catch { /* no .env: the tutor stays off unless the key is set elsewhere */ }
+loadEnvFile(path.join(ROOT, '.env'));
 
 // Development only: LEARN_FAKE_TUTOR=<module> replaces the Claude client (default export), for UI checks without a key.
 if (process.env.LEARN_FAKE_TUTOR) setClientForTests((await import(path.resolve(process.env.LEARN_FAKE_TUTOR))).default);

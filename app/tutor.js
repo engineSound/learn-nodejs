@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import util from 'node:util';
 import { runLesson, runSnippet } from './runner.js';
 import { visualProblems } from './visuals.js';
 
@@ -29,9 +30,44 @@ async function getClient() {
     } catch {
       throw new TutorError('The tutor needs the Anthropic SDK: run `npm install @anthropic-ai/sdk` in this repo, then restart.', 503);
     }
-    client = new sdk(); // credentials: ANTHROPIC_API_KEY (from .env), ANTHROPIC_AUTH_TOKEN or an `ant auth login` profile
+    // Only the API key: an ANTHROPIC_AUTH_TOKEN left in the shell (other tools set one) would be sent too and get rejected.
+    client = new sdk({ apiKey: process.env.ANTHROPIC_API_KEY || null, authToken: null });
   }
   return client;
+}
+
+// ---------- the API key ----------
+
+const fromEnvFile = new Set();
+
+/** Load .env into process.env. Its values win over the shell's, so an old exported key can't shadow it. */
+export function loadEnvFile(file) {
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch { return; } // no .env: the tutor stays off unless the key is set elsewhere
+  for (const [k, v] of Object.entries(util.parseEnv(text))) {
+    if (!v.trim()) continue;
+    process.env[k] = v.trim();
+    fromEnvFile.add(k);
+  }
+}
+
+/**
+ * Why a key was rejected, without revealing it: where it came from, its prefix and last 4 characters
+ * (as console.anthropic.com shows them), and the usual mix-ups. Same wording in learn-rust.
+ */
+export function keyProblem(apiMessage) {
+  const key = process.env.ANTHROPIC_API_KEY || '';
+  const where = fromEnvFile.has('ANTHROPIC_API_KEY') ? '.env' : 'your shell environment (not .env)';
+  const lines = [`The API key was rejected${apiMessage ? ` ("${apiMessage}")` : ''}.`];
+  if (!key) return 'No API key is set. Put ANTHROPIC_API_KEY in .env, then restart.';
+  lines.push(`The app used the key from ${where}: ${key.slice(0, 12)}…${key.slice(-4)} (${key.length} characters).`);
+  if (!fromEnvFile.has('ANTHROPIC_API_KEY')) lines.push('Put your key in .env (it wins over the shell), or remove the old `export ANTHROPIC_API_KEY` from your shell profile.');
+  if (key.startsWith('sk-ant-oat')) lines.push('This is a Claude subscription login token, not an API key. Create an API key at console.anthropic.com → API keys.');
+  else if (!key.startsWith('sk-ant-api')) lines.push('That doesn\'t look like an Anthropic API key (they start with sk-ant-api). Check for a stray character or a different value.');
+  const base = process.env.ANTHROPIC_BASE_URL;
+  if (base && !/^https:\/\/api\.anthropic\.com\/?$/.test(base)) lines.push(`Requests go to ${base} (ANTHROPIC_BASE_URL${fromEnvFile.has('ANTHROPIC_BASE_URL') ? ' in .env' : ' in your shell'}), not api.anthropic.com: remove it.`);
+  if (lines.length === 2) lines.push('If those characters match a key at console.anthropic.com → API keys, check that it is active; otherwise paste the key into .env again, then restart.');
+  return lines.join(' ');
 }
 
 export async function tutorStatus() {
@@ -59,7 +95,7 @@ async function ask({ system, messages, effort, schema }) {
       messages,
     });
   } catch (err) {
-    if (sdk && err instanceof sdk.AuthenticationError) throw new TutorError('The API key was rejected. Check ANTHROPIC_API_KEY in .env.', 401);
+    if (sdk && err instanceof sdk.AuthenticationError) throw new TutorError(keyProblem(err.error?.error?.message), 401);
     if (sdk && err instanceof sdk.RateLimitError) throw new TutorError('The tutor is rate-limited right now. Try again in a minute.', 429);
     if (sdk && err instanceof sdk.APIError) throw new TutorError(`The Claude API returned an error (${err.status ?? 'network'}): ${err.message}`);
     throw err;

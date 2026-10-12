@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { setClientForTests, hint, visualizeRun, toVisual, generateDrill, learnerSection, drillTarget, describeResult, MODEL, TutorError } from './tutor.js';
+import { loadEnvFile, keyProblem, setClientForTests, hint, visualizeRun, toVisual, generateDrill, learnerSection, drillTarget, describeResult, MODEL, TutorError } from './tutor.js';
 import { loadLesson } from './lessons.js';
 import { runLesson } from './runner.js';
 import { buildProfile } from './profile.js';
@@ -234,4 +234,29 @@ test('toVisual turns the schema answer into a spec visual.js can play', () => {
   assert.deepEqual(Object.keys(v), ['title', 'intro', 'regions', 'scenarios']);
   assert.deepEqual(v.regions, [{ id: 'fn', label: 'Inside greeting(name)' }, { id: 'out', label: 'Console', kind: 'output' }]);
   assert.deepEqual(v.scenarios[0].steps[1].arrows, [{ from: 'n', to: 'r', label: '+', state: 'bad' }]);
+});
+
+test('.env wins over an old key in the shell, and a rejected key is explained without revealing it', () => {
+  const saved = { key: process.env.ANTHROPIC_API_KEY, base: process.env.ANTHROPIC_BASE_URL };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'learn-env-'));
+  try {
+    delete process.env.ANTHROPIC_BASE_URL;
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-oat01-old-shell-token-xyz';
+    assert.match(keyProblem('invalid x-api-key'), /your shell environment \(not \.env\).*subscription login token/);
+
+    const real = 'sk-ant-api03-' + 'A'.repeat(80) + 'Wxyz';
+    fs.writeFileSync(path.join(dir, '.env'), `# my key\nANTHROPIC_API_KEY="${real}"\n`);
+    loadEnvFile(path.join(dir, '.env'));
+    assert.equal(process.env.ANTHROPIC_API_KEY, real);
+    const msg = keyProblem('invalid x-api-key');
+    assert.match(msg, /rejected \("invalid x-api-key"\)\. The app used the key from \.env: sk-ant-api03…Wxyz \(97 characters\)\./);
+    assert.ok(!msg.includes('A'.repeat(10)), 'never shows the key');
+    assert.match(msg, /console\.anthropic\.com/);
+
+    process.env.ANTHROPIC_BASE_URL = 'http://localhost:9999';
+    assert.match(keyProblem(''), /Requests go to http:\/\/localhost:9999 \(ANTHROPIC_BASE_URL in your shell\)/);
+  } finally {
+    for (const [k, v] of [['ANTHROPIC_API_KEY', saved.key], ['ANTHROPIC_BASE_URL', saved.base]]) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
