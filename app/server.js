@@ -7,11 +7,13 @@ import { fileURLToPath } from 'node:url';
 import { listLessons, loadLesson } from './lessons.js';
 import { runLesson } from './runner.js';
 import { appendEvent, readEvents, runPayload, lessonStats } from './history.js';
+import { buildProfile, profileMarkdown, writeProgress } from './profile.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LESSONS = path.join(ROOT, 'lessons');
 const WORK = path.join(ROOT, 'data', 'work');
 const EVENTS = process.env.LEARN_EVENTS || path.join(ROOT, 'data', 'events.jsonl');
+const PROGRESS = process.env.LEARN_PROGRESS || path.join(ROOT, 'PROGRESS.md');
 const PUBLIC = path.join(ROOT, 'app', 'public');
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -29,6 +31,22 @@ function savedCode(lesson) {
 function saveCode(lesson, code) {
   fs.mkdirSync(path.dirname(workPath(lesson)), { recursive: true });
   fs.writeFileSync(workPath(lesson), code);
+}
+
+const profileOf = events => buildProfile(INFO.track, listLessons(LESSONS), events, new Date().toISOString());
+
+/** History stats for one lesson plus its review schedule from the profile. */
+function statsFor(events, profile, lessonId) {
+  const p = profile.lessons.find(l => l.id === lessonId);
+  return { ...lessonStats(events, lessonId), review_step: p?.review_step ?? null, due: p?.due ?? null, due_now: p?.due_now ?? false };
+}
+
+/** After a run or reset: refresh the generated profile block in PROGRESS.md. */
+function refreshProgress(lessonId) {
+  const events = readEvents(EVENTS);
+  const profile = profileOf(events);
+  try { writeProgress(PROGRESS, profileMarkdown(profile)); } catch (err) { console.error('could not update PROGRESS.md:', err.message); }
+  return statsFor(events, profile, lessonId);
 }
 
 function send(res, status, body, type = 'application/json; charset=utf-8') {
@@ -57,7 +75,12 @@ async function handle(req, res) {
   if (req.method === 'GET' && p === '/api/info') return send(res, 200, INFO);
   if (req.method === 'GET' && p === '/api/lessons') {
     const events = readEvents(EVENTS);
-    return send(res, 200, listLessons(LESSONS).map(l => ({ ...l, stats: lessonStats(events, l.id) })));
+    const profile = profileOf(events);
+    return send(res, 200, listLessons(LESSONS).map(l => ({ ...l, stats: statsFor(events, profile, l.id) })));
+  }
+  if (req.method === 'GET' && p === '/api/profile') {
+    const profile = profileOf(readEvents(EVENTS));
+    return send(res, 200, { profile, markdown: profileMarkdown(profile) });
   }
 
   const m = /^\/api\/lessons\/([^/]+)(\/code|\/run)?$/.exec(p);
@@ -68,7 +91,8 @@ async function handle(req, res) {
     if (req.method === 'GET' && action === '') {
       const saved = savedCode(lesson);
       appendEvent(EVENTS, { track: INFO.track, lesson_id: lesson.meta.id, kind: 'lesson_open' });
-      const stats = lessonStats(readEvents(EVENTS), lesson.meta.id);
+      const events = readEvents(EVENTS);
+      const stats = statsFor(events, profileOf(events), lesson.meta.id);
       return send(res, 200, { slug: lesson.slug, meta: lesson.meta, body: lesson.body, file: lesson.file, code: saved ?? lesson.starter, saved: saved !== null, stats });
     }
     if (req.method === 'PUT' && action === '/code') {
@@ -78,7 +102,7 @@ async function handle(req, res) {
     if (req.method === 'DELETE' && action === '/code') {
       fs.rmSync(workPath(lesson), { force: true });
       appendEvent(EVENTS, { track: INFO.track, lesson_id: lesson.meta.id, kind: 'reset' });
-      return send(res, 200, { code: lesson.starter });
+      return send(res, 200, { code: lesson.starter, stats: refreshProgress(lesson.meta.id) });
     }
     if (req.method === 'POST' && action === '/run') {
       const code = await readBody(req);
@@ -92,7 +116,7 @@ async function handle(req, res) {
         duration_ms: result.durationMs,
         payload: runPayload(result, code),
       });
-      return send(res, 200, { ...result, stats: lessonStats(readEvents(EVENTS), lesson.meta.id) });
+      return send(res, 200, { ...result, stats: refreshProgress(lesson.meta.id) });
     }
     return send(res, 405, { error: 'Method not allowed' });
   }

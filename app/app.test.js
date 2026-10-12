@@ -104,3 +104,44 @@ test('history: append, read back, skip a torn line, compute stats', async () => 
   assert.equal(st.best_passed, 3);
   assert.equal(st.total, 3);
 });
+
+test('profile matches the shared fixture (learn-rust checks the same files)', async () => {
+  const { buildProfile, profileMarkdown } = await import('./profile.js');
+  const dir = path.join(LESSONS, '..', 'docs', 'fixtures');
+  const input = JSON.parse(fs.readFileSync(path.join(dir, 'profile-input.json'), 'utf8'));
+  const profile = buildProfile(input.track, input.lessons, input.events, input.now);
+  assert.deepEqual(profile, JSON.parse(fs.readFileSync(path.join(dir, 'profile-expected.json'), 'utf8')));
+  assert.equal(profileMarkdown(profile) + '\n', fs.readFileSync(path.join(dir, 'profile-expected.md'), 'utf8'));
+});
+
+test('profile: no events, and a review that passes moves up the schedule', async () => {
+  const { buildProfile } = await import('./profile.js');
+  const lessons = [{ id: 'a', title: 'A', concepts: ['c'] }];
+  const empty = buildProfile('t', lessons, [], '2026-01-01T00:00:00.000Z');
+  assert.deepEqual(empty.sessions, { count: 0, streak_days: 0, minutes_total: 0, last_ts: null });
+  assert.deepEqual(empty.next, { kind: 'lesson', lesson_id: 'a', title: 'A', reason: 'next new lesson' });
+  assert.equal(empty.concepts[0].mastery, null);
+
+  const ev = (ts, kind) => ({ ts, lesson_id: 'a', kind, payload: { passed: 1, total: 1, failing: [], errors: [] } });
+  const reviewed = buildProfile('t', lessons, [
+    ev('2026-01-01T10:00:00.000Z', 'pass'), // solved: review in 1 day
+    ev('2026-01-02T11:00:00.000Z', 'pass'), // review 1 passed: next in 3 days
+    ev('2026-01-05T12:00:00.000Z', 'pass'), // review 2 passed: next in 7 days
+  ], '2026-01-06T00:00:00.000Z');
+  assert.equal(reviewed.lessons[0].review_step, 2);
+  assert.equal(reviewed.lessons[0].due, '2026-01-12T12:00:00.000Z');
+  assert.equal(reviewed.lessons[0].due_now, false);
+  assert.equal(reviewed.concepts[0].mastery, 0.9);
+  assert.deepEqual(reviewed.next, { kind: 'done', lesson_id: null, title: null, reason: 'all lessons solved; next review 2026-01-12' });
+});
+
+test('writeProgress replaces the generated block and keeps the rest', async () => {
+  const { writeProgress } = await import('./profile.js');
+  const os = await import('node:os');
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'learn-prog-')), 'PROGRESS.md');
+  fs.writeFileSync(file, '# Progress\n\nintro\n\n## Log\n| a |\n');
+  writeProgress(file, '<!-- profile:start -->\nONE\n<!-- profile:end -->');
+  assert.equal(fs.readFileSync(file, 'utf8'), '# Progress\n\nintro\n\n<!-- profile:start -->\nONE\n<!-- profile:end -->\n\n## Log\n| a |\n');
+  writeProgress(file, '<!-- profile:start -->\nTWO\n<!-- profile:end -->');
+  assert.equal(fs.readFileSync(file, 'utf8'), '# Progress\n\nintro\n\n<!-- profile:start -->\nTWO\n<!-- profile:end -->\n\n## Log\n| a |\n');
+});

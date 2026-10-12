@@ -11,7 +11,7 @@ everything so a tutor (Claude) can adapt to me.
 browser ──► node:http server ──► runner (child process, node --test, 10 s timeout)
                  │
                  ├──► data/events.jsonl  (event log, see SHARED-FORMAT.md)
-                 ├──► profile builder → data/profile.md
+                 ├──► profile → PROGRESS.md (generated block)
                  └──► tutor: Claude API (profile + lesson + my code + test output)
 ```
 
@@ -24,14 +24,16 @@ browser ──► node:http server ──► runner (child process, node --test,
 - **Runner** (`app/runner.js`): copies the lesson to a temp folder, writes my
   code into the `edit:` file, runs `node --test --test-reporter=tap` in a
   child process with a 10 s timeout, and parses the TAP output into JSON.
+- **Profile** (`app/profile.js`): derives concept mastery, the review
+  schedule, recurring mistakes and the next step from the events (rules in
+  `docs/SHARED-FORMAT.md`), and rewrites the generated block in `PROGRESS.md`
+  after every run.
 - **Server** (`app/server.js`): the API in `docs/SHARED-FORMAT.md`. Listens
   on 127.0.0.1 only unless `HOST` is set.
 - **History** (`app/history.js`): every lesson open and every run is
   appended to `data/events.jsonl`; per-lesson stats are derived from it on
   each request. The file lives only on the machine running the app (it's
-  gitignored). The learner profile (M3) is the summary that gets committed.
-- **Profile builder:** after each session, recomputes per-concept mastery and
-  review dates (spaced repetition) and writes `data/profile.md`.
+  gitignored). The learner profile is the summary that gets committed.
 - **Tutor:** called only when I ask for a hint or explanation, or after
   repeated failures. Prompt = profile + lesson.md + my code + test output.
   API key in `.env` (`ANTHROPIC_API_KEY`), never committed.
