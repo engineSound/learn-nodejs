@@ -1,9 +1,10 @@
-// The tutor: hints and newly generated drills from Claude, adapted to the learner's profile.
+// The tutor: hints, step-through visuals of the learner's own code and newly generated drills from Claude, adapted to the learner's profile.
 // Prompts live in docs/tutor/ (shared with learn-rust). Rules: docs/SHARED-FORMAT.md, section 6.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { runLesson } from './runner.js';
+import { runLesson, runSnippet } from './runner.js';
+import { visualProblems } from './visuals.js';
 
 export const MODEL = 'claude-opus-5-5';
 const MAX_TOKENS = 16000;
@@ -116,6 +117,90 @@ export async function hint(ctx, { title, lesson, file, code, result, question })
     question: question && question.trim() ? question.trim() : '(No question: they pressed "Hint".)',
   });
   return (await ask({ system: systemPrompt(ctx), messages: [{ role: 'user', content: user }], effort: 'medium' })).trim();
+}
+
+// ---------- "Show me what my code does": a visual of the learner's own failing run ----------
+
+/** The lesson text without its ```visual blocks (they are long; the first one is sent as the style example). */
+export function splitVisuals(body) {
+  const visuals = [...String(body).matchAll(/```visual\n([\s\S]*?)\n```/g)].map(m => m[1]);
+  return { text: String(body).replace(/\n?```visual\n[\s\S]*?\n```\n?/g, '\n'), example: visuals[0] || null };
+}
+
+/** The first scenario of a lesson visual, as a compact style example. */
+function exampleOf(json) {
+  try {
+    const spec = JSON.parse(json);
+    return JSON.stringify({ title: spec.title, regions: spec.regions, scenarios: spec.scenarios.slice(0, 1).map(({ check, ...sc }) => sc) });
+  } catch { return '(none)'; }
+}
+
+/** Schema answer → the visual spec visual.js plays ("" and 0 mean "not set"). */
+export function toVisual(reply) {
+  const keep = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== ''));
+  const steps = (reply.scenario?.steps || []).map(s => keep({
+    line: s.line > 0 ? s.line : '',
+    say: s.say, rule: s.rule, error: s.error,
+    set: (s.set || []).map(keep),
+    drop: s.drop || [],
+    arrows: (s.arrows || []).map(keep),
+  }));
+  return {
+    title: reply.title,
+    intro: reply.intro,
+    regions: (reply.regions || []).map(keep),
+    scenarios: [{ name: reply.scenario?.name || 'Your code', group: 'Your code', code: reply.scenario?.code || '', steps }],
+  };
+}
+
+const flat = s => String(s).trim().split(/\s+/).join(' ');
+
+/** Run the claimed call on the learner's real code; null when the claim holds, else what really happened. */
+async function checkClaim(code, check) {
+  const prints = flat(check?.prints || '');
+  if (!prints) return 'check.prints is empty.';
+  const call = String(check.call || '').trim();
+  const r = await runSnippet(call ? `${code}\n;console.log(${call});\n` : code);
+  const out = flat(r.output);
+  if (r.timedOut) return `Running \`${call}\` on their code timed out.`;
+  if (r.ok && !call) return 'Their code loads fine, so check.call must make the call the failing test makes.';
+  if (r.ok ? out === prints || out.endsWith(' ' + prints) : prints.length >= 3 && out.includes(prints)) return null;
+  return `Running ${call ? `\`console.log(${call})\`` : 'their code'} really printed:\n\n${r.output.trim().slice(0, 1500)}\n\nbut check.prints says "${check.prints}". Trace their code again: the visual must show what really happens.`;
+}
+
+/**
+ * Ask Claude for a step-through visual of the learner's code on the first failing test,
+ * then check it: its structure (as visual.js will play it) and its claim (run on the real code).
+ *
+ * @param ctx   { docsDir, trackName, learner, profileMarkdown }
+ * @param input { title, lesson, file, code, result }
+ * @returns { visual, verified: { call, prints }, attempts }
+ */
+export async function visualizeRun(ctx, { title, lesson, file, code, result }) {
+  const { text, example } = splitVisuals(lesson);
+  const user = render(readPrompt(ctx.docsDir, 'visual.md'), {
+    title, lesson: text.trim(), file, code, result: describeResult(result),
+    example: example ? exampleOf(example) : '(this lesson has none)',
+    call_rule: 'a JavaScript expression that calls their code the way the failing test does (the app runs `console.log(<call>)` after their module; `await` is allowed)',
+    compile_word: 'load',
+  });
+  const schema = JSON.parse(readPrompt(ctx.docsDir, 'visual-schema.json'));
+  const messages = [{ role: 'user', content: user }];
+  let problem = null;
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+    const reply = await ask({ system: systemPrompt(ctx), messages, effort: 'medium', schema });
+    let parsed = null;
+    try { parsed = JSON.parse(reply); } catch { problem = 'The reply was not valid JSON.'; }
+    if (parsed) {
+      const visual = toVisual(parsed);
+      const shape = visualProblems(visual);
+      problem = shape.length ? 'The visualizer cannot play it:\n- ' + shape.slice(0, 8).join('\n- ') : await checkClaim(code, parsed.check);
+      if (!problem) return { visual, verified: { call: String(parsed.check.call || '').trim(), prints: parsed.check.prints.trim() }, attempts: attempt };
+    }
+    messages.push({ role: 'assistant', content: reply });
+    messages.push({ role: 'user', content: `The app checked this visual and it failed:\n\n${problem}\n\nReturn a corrected visual in the same format.` });
+  }
+  throw new TutorError(`The tutor couldn't trace your code reliably (${problem.split('\n')[0]}). Try again, or ask a question instead.`);
 }
 
 // ---------- generated drills ----------

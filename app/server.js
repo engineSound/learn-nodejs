@@ -8,7 +8,7 @@ import { listLessons, loadLesson } from './lessons.js';
 import { runLesson, runSnippet } from './runner.js';
 import { appendEvent, readEvents, runPayload, lessonStats } from './history.js';
 import { buildProfile, profileMarkdown, writeProgress } from './profile.js';
-import { tutorStatus, hint, generateDrill, drillTarget, learnerSection, setClientForTests } from './tutor.js';
+import { tutorStatus, hint, visualizeRun, generateDrill, drillTarget, learnerSection, setClientForTests } from './tutor.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LESSONS = path.join(ROOT, 'lessons');
@@ -127,7 +127,7 @@ async function handle(req, res) {
     return send(res, 200, { profile, markdown: profileMarkdown(profile), next: withSlug(profile.next) });
   }
 
-  const m = /^\/api\/lessons\/([^/]+)(\/code|\/run|\/feedback|\/hint|\/drill|\/log)?$/.exec(p);
+  const m = /^\/api\/lessons\/([^/]+)(\/code|\/run|\/feedback|\/hint|\/visualize|\/drill|\/log)?$/.exec(p);
   if (m) {
     const lesson = loadLesson(LESSONS, decodeURIComponent(m[1]));
     if (!lesson) return send(res, 404, { error: 'No such lesson' });
@@ -190,6 +190,16 @@ async function handle(req, res) {
       });
       appendEvent(EVENTS, { track: INFO.track, lesson_id: lesson.meta.id, kind: 'hint', payload: { source: 'tutor', question: question.trim() || null } });
       return send(res, 200, { hint: text });
+    }
+    if (req.method === 'POST' && action === '/visualize') {
+      const { code = '' } = parseJson(await readBody(req));
+      saveCode(lesson, code);
+      const result = await runLesson(lesson, code);
+      if (result.total > 0 && !result.failed && !result.timedOut && !result.compileErrors.length) return send(res, 400, { error: 'Every check passes now: nothing to trace.' });
+      if (result.timedOut) return send(res, 400, { error: 'Your code runs forever, so there is nothing to trace yet. Look for a loop that never ends.' });
+      const made = await visualizeRun(tutorContext(profileOf(readEvents(EVENTS))), { title: lesson.meta.title, lesson: lesson.body, file: lesson.file, code, result });
+      appendEvent(EVENTS, { track: INFO.track, lesson_id: lesson.meta.id, kind: 'hint', payload: { source: 'visual', question: null } });
+      return send(res, 200, made);
     }
     if (req.method === 'POST' && action === '/drill') {
       const all = listLessons(LESSONS);

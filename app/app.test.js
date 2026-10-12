@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFrontMatter, listLessons, loadLesson } from './lessons.js';
 import { parseTap, runLesson } from './runner.js';
+import { visualProblems } from './visuals.js';
 
 const LESSONS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'lessons');
 
@@ -156,21 +157,6 @@ test('writeProgress replaces the generated block and keeps the rest', async () =
   assert.equal(fs.readFileSync(file, 'utf8'), '# Progress\n\nintro\n\n<!-- profile:start -->\nTWO\n<!-- profile:end -->\n\n## Log\n| a |\n');
 });
 
-/** The scene after each step, as visual.js computes it (boxes merged by id, arrows replaced). */
-function scenes(scenario) {
-  let boxes = [], arrows = [];
-  return scenario.steps.map(step => {
-    for (const id of step.drop || []) boxes = boxes.filter(b => b.id !== id);
-    for (const s of step.set || []) {
-      const found = boxes.find(b => b.id === s.id);
-      if (found) Object.assign(found, s);
-      else boxes.push({ ...s });
-    }
-    if (step.arrows) arrows = step.arrows;
-    return { boxes: boxes.map(b => ({ ...b })), arrows };
-  });
-}
-
 test('every visual is well-formed, and its checks match what the code really does', async () => {
   const { runSnippet } = await import('./runner.js');
   let count = 0;
@@ -181,18 +167,7 @@ test('every visual is well-formed, and its checks match what the code really doe
       assert.ok(spec.scenarios?.length, `${slug}: a visual needs scenarios`);
       for (const sc of spec.scenarios) {
         const where = `${slug} / ${sc.name}`;
-        const regions = new Set((sc.regions || spec.regions || []).map(r => r.id));
-        const lines = String(sc.code || '').split('\n').length;
-        assert.ok(regions.size, `${where}: no regions`);
-        assert.ok(sc.steps.length >= 2, `${where}: needs at least 2 steps`);
-        scenes(sc).forEach((scene, i) => {
-          const step = sc.steps[i];
-          assert.ok(step.say, `${where} step ${i + 1}: needs "say"`);
-          for (const b of scene.boxes) assert.ok(regions.has(b.in), `${where} step ${i + 1}: box ${b.id} is in unknown region ${b.in}`);
-          const ids = new Set(scene.boxes.map(b => b.id));
-          for (const a of scene.arrows) assert.ok(ids.has(a.from) && ids.has(a.to), `${where} step ${i + 1}: arrow ${a.from} → ${a.to} points at a missing box`);
-          for (const n of [].concat(step.line ?? [])) assert.ok(n >= 1 && n <= lines, `${where} step ${i + 1}: line ${n} is outside the code`);
-        });
+        assert.deepEqual(visualProblems({ ...spec, scenarios: [sc] }), [], where);
         if (sc.check) {
           const r = await runSnippet((sc.check.prelude ? sc.check.prelude + '\n' : '') + sc.code);
           if (sc.check.error) {

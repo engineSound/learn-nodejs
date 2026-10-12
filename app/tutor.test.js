@@ -4,8 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { setClientForTests, hint, generateDrill, learnerSection, drillTarget, describeResult, MODEL, TutorError } from './tutor.js';
+import { setClientForTests, hint, visualizeRun, toVisual, generateDrill, learnerSection, drillTarget, describeResult, MODEL, TutorError } from './tutor.js';
 import { loadLesson } from './lessons.js';
+import { runLesson } from './runner.js';
 import { buildProfile } from './profile.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -147,4 +148,90 @@ test('drillTarget summarises the learner\'s difficulties with this lesson', () =
   assert.match(target, /average of an empty array is null ×2/);
   assert.match(target, /arrays 0\.20/);
   assert.equal(describeResult(null), 'Not run yet.');
+});
+
+/** A reply in visual-schema.json's shape: every field present, "" and 0 meaning "not set". */
+function traceReply({ call = "greeting('Sam')", prints = 'Hello Sam', arrowTo = 'r', line = 2 } = {}) {
+  const box = (id, inn, title, value, state = '') => ({ id, in: inn, title, value, tag: '', sub: '', state });
+  const step = (line, say, set, arrows = [], extra = {}) => ({ line, say, rule: '', error: '', set, drop: [], arrows, ...extra });
+  return JSON.stringify({
+    title: 'What your greeting() does with "Sam"',
+    intro: 'Watch the text being built.',
+    regions: [{ id: 'fn', label: 'Inside greeting(name)', kind: '' }, { id: 'out', label: 'Console', kind: 'output' }],
+    scenario: {
+      name: 'Your code with "Sam"',
+      code: "export function greeting(name) {\n  return 'Hello ' + name;\n}\nconsole.log(greeting('Sam'));",
+      steps: [
+        step(4, 'The test calls greeting("Sam").', [box('n', 'fn', 'name', '"Sam"', 'active')]),
+        step(line, 'Your code joins "Hello " and the name: no comma, no "!".', [box('r', 'fn', 'result', '"Hello Sam"', 'bad')], [{ from: 'n', to: arrowTo, label: '+', state: 'bad', style: '' }]),
+        step(0, 'The test wanted "Hello, Sam!".', [box('o', 'out', '', 'Hello Sam')], [], { error: 'Expected "Hello, Sam!", got "Hello Sam"', rule: 'Template literals: `Hello, ${name}!`' }),
+      ],
+    },
+    check: { call, prints },
+  });
+}
+
+test('visualizeRun: the trace is checked on the real code, and a wrong claim is sent back once', async () => {
+  const lesson = loadLesson(path.join(ROOT, 'lessons'), '01-first-function');
+  const code = "export function greeting(name) {\n  return 'Hello ' + name;\n}\n";
+  const result = await runLesson(lesson, code);
+  const client = fakeClient([traceReply({ prints: 'Hello, Sam!' }), traceReply()]);
+  setClientForTests(client);
+  try {
+    const made = await visualizeRun(context(os.tmpdir()), { title: lesson.meta.title, lesson: lesson.body, file: lesson.file, code, result });
+    assert.equal(made.attempts, 2);
+    assert.deepEqual(made.verified, { call: "greeting('Sam')", prints: 'Hello Sam' });
+    const sc = made.visual.scenarios[0];
+    assert.equal(sc.group, 'Your code');
+    assert.equal(sc.steps.length, 3);
+    assert.equal(sc.steps[2].line, undefined, 'line 0 means no line');
+    assert.equal(sc.steps[0].rule, undefined, 'empty strings are dropped');
+    assert.deepEqual(sc.steps[0].set[0], { id: 'n', in: 'fn', title: 'name', value: '"Sam"', state: 'active' });
+    assert.equal(made.visual.regions[0].kind, undefined);
+
+    const [first, retry] = client.requests;
+    assert.equal(first.model, MODEL);
+    assert.equal(first.output_config.effort, 'medium');
+    assert.equal(first.output_config.format.type, 'json_schema');
+    assert.ok(first.output_config.format.schema.properties.check);
+    const prompt = first.messages[0].content;
+    assert.ok(prompt.includes("return 'Hello ' + name;") && prompt.includes('FAILED'), 'sends their code and the failing tests');
+    assert.ok(!prompt.includes('```visual'), 'the lesson text is sent without its visual blocks');
+    const sentBack = retry.messages.at(-1).content;
+    assert.ok(sentBack.includes('really printed') && sentBack.includes('Hello Sam'), sentBack);
+  } finally {
+    setClientForTests(null);
+  }
+});
+
+test('visualizeRun: a visual the player cannot show is never returned', async () => {
+  const client = fakeClient([traceReply({ arrowTo: 'nowhere' }), traceReply({ line: 9 })]);
+  setClientForTests(client);
+  try {
+    await assert.rejects(
+      visualizeRun(context(os.tmpdir()), { title: 'T', lesson: '# L', file: 'exercise.js', code: "export function greeting(name) {\n  return 'Hello ' + name;\n}\n", result: null }),
+      e => e instanceof TutorError && /couldn't trace/.test(e.message),
+    );
+    assert.match(client.requests[1].messages.at(-1).content, /arrow n → nowhere points at a missing box/);
+  } finally {
+    setClientForTests(null);
+  }
+});
+
+test('visualizeRun: code that does not load is traced to its real error', async () => {
+  const client = fakeClient([traceReply({ call: '', prints: 'SyntaxError' })]);
+  setClientForTests(client);
+  try {
+    const made = await visualizeRun(context(os.tmpdir()), { title: 'T', lesson: '# L', file: 'exercise.js', code: 'export function greeting(name) {\n  return name +;\n}\n', result: null });
+    assert.deepEqual(made.verified, { call: '', prints: 'SyntaxError' });
+  } finally {
+    setClientForTests(null);
+  }
+});
+
+test('toVisual turns the schema answer into a spec visual.js can play', () => {
+  const v = toVisual(JSON.parse(traceReply()));
+  assert.deepEqual(Object.keys(v), ['title', 'intro', 'regions', 'scenarios']);
+  assert.deepEqual(v.regions, [{ id: 'fn', label: 'Inside greeting(name)' }, { id: 'out', label: 'Console', kind: 'output' }]);
+  assert.deepEqual(v.scenarios[0].steps[1].arrows, [{ from: 'n', to: 'r', label: '+', state: 'bad' }]);
 });
