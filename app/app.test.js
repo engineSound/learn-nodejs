@@ -208,3 +208,35 @@ test('every visual is well-formed, and its checks match what the code really doe
   }
   assert.ok(count >= 20, `expected visuals in the lessons, found ${count} scenarios`);
 });
+
+test('every quick-check answer is exactly what the code prints', async () => {
+  const { runSnippet } = await import('./runner.js');
+  const flat = s => s.trim().split(/\s+/).join(' ');
+  let count = 0;
+  for (const { slug } of listLessons(LESSONS)) {
+    const l = loadLesson(LESSONS, slug);
+    for (const m of l.body.matchAll(/```predict\n([\s\S]*?)\n---\n([\s\S]*?)\n```/g)) {
+      const field = k => (m[2].match(new RegExp(`^${k}:\\s*(.*)$`, 'm')) || [])[1]?.trim() ?? '';
+      const answer = field('answer');
+      assert.ok(field('options').split('|').map(o => o.trim()).includes(answer), `${slug}: the answer must be one of the options`);
+      const r = await runSnippet(m[1]);
+      assert.equal(flat(r.output), flat(answer), `${slug}: the quick check claims different output`);
+      count++;
+    }
+  }
+  assert.ok(count >= 10, `expected quick checks in the lessons, found ${count}`);
+});
+
+test('every run example runs: the learner\'s first try must work', async () => {
+  const { runSnippet } = await import('./runner.js');
+  let count = 0;
+  for (const { slug } of listLessons(LESSONS)) {
+    const l = loadLesson(LESSONS, slug);
+    for (const m of l.body.matchAll(/```run\n([\s\S]*?)\n```/g)) {
+      const r = await runSnippet(m[1]);
+      assert.equal(r.ok, true, `${slug}: the example doesn't run:\n${r.output}`);
+      count++;
+    }
+  }
+  assert.ok(count >= 10, `expected examples in the lessons, found ${count}`);
+});
