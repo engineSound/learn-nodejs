@@ -35,7 +35,7 @@ type, in `data/work/` (not committed). After a lesson, add a line to
 `npm run dev` restarts the server when its code changes. `npm test` tests the
 app itself (lesson tests are meant to fail until you solve them).
 
-Without the app: `cd lessons/01-values-functions && node --test`.
+Without the app: `cd lessons/01-first-function && node --test`.
 
 ## The tutor (optional)
 

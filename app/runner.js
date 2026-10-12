@@ -24,7 +24,7 @@ export async function runLesson(lesson, code) {
   }
 }
 
-function exec(cmd, args, cwd) {
+function exec(cmd, args, cwd, timeoutMs = TIMEOUT_MS) {
   return new Promise(resolve => {
     // NODE_TEST_CONTEXT would make a nested `node --test` report to a parent runner instead of printing TAP.
     const { NODE_TEST_CONTEXT, NODE_OPTIONS, ...env } = process.env;
@@ -34,8 +34,8 @@ function exec(cmd, args, cwd) {
     const add = chunk => { if (output.length < MAX_OUTPUT) output += chunk; };
     child.stdout.on('data', add);
     child.stderr.on('data', add);
-    const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, TIMEOUT_MS);
-    child.on('close', () => { clearTimeout(timer); resolve({ output, timedOut }); });
+    const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, timeoutMs);
+    child.on('close', exitCode => { clearTimeout(timer); resolve({ output, timedOut, exitCode }); });
   });
 }
 
@@ -53,7 +53,12 @@ export function parseTap(text) {
     } else if (cur && line === '  ---') {
       yaml = [];
     } else if (cur && yaml && line === '  ...') {
-      cur.message = errorFromYaml(yaml);
+      cur.message = yamlField(yaml, 'error') ?? '';
+      if (!cur.ok) {
+        const expected = yamlField(yaml, 'expected');
+        const actual = yamlField(yaml, 'actual');
+        if (expected !== null || actual !== null) { cur.expected = expected ?? ''; cur.actual = actual ?? ''; }
+      }
       yaml = null;
     } else if (yaml) {
       yaml.push(line);
@@ -62,17 +67,36 @@ export function parseTap(text) {
   return tests;
 }
 
-function errorFromYaml(lines) {
-  const i = lines.findIndex(l => l.startsWith('  error: '));
-  if (i < 0) return '';
-  const value = lines[i].slice('  error: '.length);
-  if (value !== '|-' && value !== '|') return value.replace(/^'(.*)'$/, '$1').replace(/''/g, "'");
+/** One field of the TAP YAML block, as display text (single-line or indented block). */
+function yamlField(lines, name) {
+  const i = lines.findIndex(l => l.startsWith(`  ${name}:`));
+  if (i < 0) return null;
+  const value = lines[i].slice(`  ${name}:`.length).trim();
+  if (value && value !== '|-' && value !== '|') {
+    // Single-quoted YAML strings are JavaScript strings: show them with double quotes.
+    const quoted = /^'(.*)'$/.exec(value);
+    return quoted ? JSON.stringify(quoted[1].replace(/''/g, "'")) : value;
+  }
   const out = [];
   for (const l of lines.slice(i + 1)) {
     if (!l.startsWith('    ') && l.trim() !== '') break;
     out.push(l.slice(4));
   }
   return out.join('\n').trim();
+}
+
+/** Run a small example from a lesson (```run blocks) as an ES module, with a short timeout. */
+export async function runSnippet(code) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'learn-snippet-'));
+  try {
+    const file = path.join(tmp, 'snippet.mjs');
+    fs.writeFileSync(file, code);
+    const { output, timedOut, exitCode } = await exec(process.execPath, [file], tmp, 5_000);
+    const clean = output.split(file).join('snippet.mjs');
+    return { output: clean, ok: exitCode === 0 && !timedOut, errors: [], timedOut };
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 export function summarize(tests, output, durationMs, timedOut) {

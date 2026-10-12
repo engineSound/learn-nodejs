@@ -32,7 +32,7 @@ function context(dir) {
 }
 
 const parent = (() => {
-  const l = loadLesson(path.join(ROOT, 'lessons'), '01-values-functions');
+  const l = loadLesson(path.join(ROOT, 'lessons'), '04-active-devices');
   return { id: l.meta.id, slug: l.slug, title: l.meta.title, concepts: l.meta.concepts, body: l.body };
 })();
 
@@ -87,8 +87,8 @@ test('generateDrill: verifies, then saves a drill the app can load (solution kep
   const fake = fakeClient([JSON.stringify(goodDrill)]);
   setClientForTests(fake);
   const made = await generateDrill(context(dir), { parent, existing: '(none)', target: '- E0308 ×3' });
-  assert.equal(made.slug, '01g-totals-without-surprises');
-  assert.equal(made.id, 'node-01g-totals-without-surprises');
+  assert.equal(made.slug, '04g-totals-without-surprises');
+  assert.equal(made.id, 'node-04g-totals-without-surprises');
   assert.equal(made.attempts, 1);
   const req = fake.requests[0];
   assert.equal(req.output_config.effort, 'high');
@@ -99,7 +99,7 @@ test('generateDrill: verifies, then saves a drill the app can load (solution kep
   const saved = loadLesson(path.join(dir, 'lessons'), made.slug);
   assert.equal(saved.meta.kind, 'drill');
   assert.equal(saved.meta.for, parent.id);
-  assert.deepEqual(saved.meta.concepts, ['array-methods', 'equality']);
+  assert.deepEqual(saved.meta.concepts, ['array-methods']);
   assert.equal(saved.meta.targets, 'Empty arrays and reduce: 1 mistake so far.');
   assert.match(saved.starter, /TODO: total/);
   assert.ok(!fs.existsSync(path.join(dir, 'lessons', made.slug, 'solution.js')));
@@ -108,7 +108,7 @@ test('generateDrill: verifies, then saves a drill the app can load (solution kep
   // A second drill with the same slug gets its own folder.
   setClientForTests(fakeClient([JSON.stringify(goodDrill)]));
   const again = await generateDrill(context(dir), { parent, existing: '', target: '' });
-  assert.equal(again.slug, '01g-totals-without-surprises-2');
+  assert.equal(again.slug, '04g-totals-without-surprises-2');
   setClientForTests(null);
 });
 
@@ -145,6 +145,6 @@ test('drillTarget summarises the learner\'s difficulties with this lesson', () =
   const target = drillTarget(profile, parent, events, [parent.id]);
   assert.match(target, /2 runs, not solved yet/);
   assert.match(target, /average of an empty array is null ×2/);
-  assert.match(target, /equality 0\.20/);
+  assert.match(target, /arrays 0\.20/);
   assert.equal(describeResult(null), 'Not run yet.');
 });

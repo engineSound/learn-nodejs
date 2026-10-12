@@ -24,6 +24,10 @@ test('every lesson has the required front matter and its edit file exists', () =
     const kind = l.meta.kind || 'core';
     assert.ok(['core', 'drill', 'stretch'].includes(kind), `${slug}: unknown kind ${kind}`);
     if (kind !== 'core') assert.ok(lessons.some(o => o.id === l.meta.for && o.kind === 'core'), `${slug}: "for" must name a core lesson`);
+    // Learn first: every exercise explains before it tests (docs/SHARED-FORMAT.md, section 1).
+    assert.match(l.body, /^## (Learn the idea|Recall)$/m, `${slug} needs a "## Learn the idea" (or "## Recall") section`);
+    assert.match(l.body, /^## Your turn$/m, `${slug} needs a "## Your turn" section`);
+    if (kind === 'core') assert.match(l.body, /^## Hints$/m, `${slug} needs a "## Hints" section`);
     assert.ok(l.starter.length > 0);
   }
 });
@@ -31,6 +35,24 @@ test('every lesson has the required front matter and its edit file exists', () =
 test('loadLesson rejects path tricks', () => {
   assert.equal(loadLesson(LESSONS, '../app'), null);
   assert.equal(loadLesson(LESSONS, 'no-such-lesson'), null);
+});
+
+test('failing checks carry plain expected / got values', async () => {
+  const lesson = loadLesson(LESSONS, '01-first-function');
+  const r = await runLesson(lesson, 'export function greeting(name) { return "Hi " + name; }');
+  const t = r.tests.find(t => t.name === 'says hello to Sam');
+  assert.equal(t.ok, false);
+  assert.equal(t.expected, '"Hello, Sam!"');
+  assert.equal(t.actual, '"Hi Sam"');
+});
+
+test('runSnippet runs a lesson example and reports failures', async () => {
+  const { runSnippet } = await import('./runner.js');
+  const ok = await runSnippet('console.log(`sum: ${1 + 2}`)');
+  assert.deepEqual([ok.ok, ok.output.trim()], [true, 'sum: 3']);
+  const broken = await runSnippet('throw new Error("boom")');
+  assert.equal(broken.ok, false);
+  assert.match(broken.output, /boom/);
 });
 
 test('parseTap reads results and multi-line errors', () => {
@@ -58,7 +80,7 @@ test('parseTap reads results and multi-line errors', () => {
 });
 
 test('runLesson: starter fails, a syntax error is reported as not loading', async () => {
-  const lesson = loadLesson(LESSONS, '01-values-functions');
+  const lesson = loadLesson(LESSONS, '01-first-function');
   const starter = await runLesson(lesson, lesson.starter);
   assert.equal(starter.passed, 0);
   assert.ok(starter.failed > 0);
@@ -69,16 +91,12 @@ test('runLesson: starter fails, a syntax error is reported as not loading', asyn
 });
 
 test('runLesson: a correct solution passes every test', async () => {
-  const lesson = loadLesson(LESSONS, '01-values-functions');
-  const solution = `
-export const parseScores = line => line.split(',').map(s => s.trim()).filter(s => s !== '').map(Number).filter(n => !Number.isNaN(n));
-export const average = nums => nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
-export const groupByLength = words => words.reduce((acc, w) => { (acc[w.length] ??= []).push(w); return acc; }, {});
-export const makeMultiplier = factor => x => x * factor;`;
+  const lesson = loadLesson(LESSONS, '01-first-function');
+  const solution = 'export function greeting(name) { return `Hello, ${name}!`; }';
   const r = await runLesson(lesson, solution);
   assert.equal(r.failed, 0, r.output);
   assert.equal(r.passed, r.total);
-  assert.ok(r.total >= 9);
+  assert.ok(r.total >= 3);
   assert.equal(fs.existsSync(lesson.dir + '/package.json'), false, 'runner must not write into the lesson folder');
 });
 

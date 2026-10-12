@@ -1,4 +1,4 @@
-// Stretch: word statistics. Replace the `throw`, then run the tests.
+// Challenge: word statistics. Replace the `throw`, then run the checks.
 
 /**
  * Statistics about the words in `text` (words are separated by whitespace,

@@ -35,7 +35,7 @@ export function listLessons(lessonsDir) {
     .sort()
     .map(slug => {
       const { meta } = parseFrontMatter(fs.readFileSync(path.join(lessonsDir, slug, 'lesson.md'), 'utf8'));
-      return { slug, id: meta.id, title: meta.title || slug, minutes: meta.minutes, concepts: meta.concepts || [], kind: meta.kind || 'core', for: meta.for || null };
+      return { slug, id: meta.id, title: meta.title || slug, minutes: meta.minutes, concepts: meta.concepts || [], kind: meta.kind || 'core', for: meta.for || null, topic: meta.topic || null };
     });
 }
 

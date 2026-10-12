@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listLessons, loadLesson } from './lessons.js';
-import { runLesson } from './runner.js';
+import { runLesson, runSnippet } from './runner.js';
 import { appendEvent, readEvents, runPayload, lessonStats } from './history.js';
 import { buildProfile, profileMarkdown, writeProgress } from './profile.js';
 import { tutorStatus, hint, generateDrill, drillTarget, learnerSection, setClientForTests } from './tutor.js';
@@ -27,7 +27,7 @@ const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '127.0.0.1';
 const MAX_BODY = 256 * 1024;
 
-const INFO = { track: 'nodejs', title: 'Learn Node.js', accent: '#2f7d32' };
+const INFO = { track: 'nodejs', title: 'Node.js Lab', accent: '#1f7a45' };
 const TYPES = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
 
 const workPath = lesson => path.join(WORK, lesson.slug, lesson.file);
@@ -114,12 +114,20 @@ async function handle(req, res) {
     const profile = profileOf(events);
     return send(res, 200, listLessons(LESSONS).map(l => ({ ...l, stats: statsFor(events, profile, l.id) })));
   }
+  if (req.method === 'POST' && p === '/api/snippet') {
+    const { code = '' } = parseJson(await readBody(req));
+    return send(res, 200, await runSnippet(String(code)));
+  }
+  if (req.method === 'GET' && p === '/api/history') {
+    const events = readEvents(EVENTS).filter(e => e.kind !== 'lesson_open').slice(-300).reverse();
+    return send(res, 200, events.map(e => ({ ...e, payload: e.payload && { ...e.payload, code: undefined } })));
+  }
   if (req.method === 'GET' && p === '/api/profile') {
     const profile = profileOf(readEvents(EVENTS));
     return send(res, 200, { profile, markdown: profileMarkdown(profile), next: withSlug(profile.next) });
   }
 
-  const m = /^\/api\/lessons\/([^/]+)(\/code|\/run|\/feedback|\/hint|\/drill)?$/.exec(p);
+  const m = /^\/api\/lessons\/([^/]+)(\/code|\/run|\/feedback|\/hint|\/drill|\/log)?$/.exec(p);
   if (m) {
     const lesson = loadLesson(LESSONS, decodeURIComponent(m[1]));
     if (!lesson) return send(res, 404, { error: 'No such lesson' });
@@ -160,6 +168,18 @@ async function handle(req, res) {
       appendEvent(EVENTS, { track: INFO.track, lesson_id: lesson.meta.id, kind: 'feedback', payload: { difficulty } });
       return send(res, 200, refreshProgress(lesson.meta.id));
     }
+    if (req.method === 'POST' && action === '/log') {
+      const { kind, payload = {} } = parseJson(await readBody(req));
+      if (kind === 'hint') {
+        const level = Number.isInteger(payload.level) ? payload.level : null;
+        appendEvent(EVENTS, { track: INFO.track, lesson_id: lesson.meta.id, kind: 'hint', payload: { source: 'lesson', level, question: null } });
+      } else if (kind === 'predict') {
+        appendEvent(EVENTS, { track: INFO.track, lesson_id: lesson.meta.id, kind: 'predict', payload: { question: Number(payload.question) || null, correct: payload.correct === true } });
+      } else {
+        return send(res, 400, { error: 'Only hint and predict can be logged' });
+      }
+      return send(res, 200, { ok: true });
+    }
     if (req.method === 'POST' && action === '/hint') {
       const { code = '', question = '' } = parseJson(await readBody(req));
       saveCode(lesson, code);
@@ -168,7 +188,7 @@ async function handle(req, res) {
       const text = await hint(tutorContext(profileOf(events)), {
         title: lesson.meta.title, lesson: lesson.body, file: lesson.file, code, result, question,
       });
-      appendEvent(EVENTS, { track: INFO.track, lesson_id: lesson.meta.id, kind: 'hint', payload: { question: question.trim() || null } });
+      appendEvent(EVENTS, { track: INFO.track, lesson_id: lesson.meta.id, kind: 'hint', payload: { source: 'tutor', question: question.trim() || null } });
       return send(res, 200, { hint: text });
     }
     if (req.method === 'POST' && action === '/drill') {

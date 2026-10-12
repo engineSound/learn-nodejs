@@ -1,4 +1,4 @@
-// Drill: equality and parsing. Replace each `throw`, then run the tests.
+// Practice: equality and parsing. Replace each `throw`, then run the checks.
 
 /**
  * Convert strings to numbers, dropping blanks and anything that isn't a number.
