@@ -34,9 +34,10 @@ browser ──► node:http server ──► runner (child process, node --test,
   appended to `data/events.jsonl`; per-lesson stats are derived from it on
   each request. The file lives only on the machine running the app (it's
   gitignored). The learner profile is the summary that gets committed.
-- **Tutor:** called only when I ask for a hint or explanation, or after
-  repeated failures. Prompt = profile + lesson.md + my code + test output.
-  API key in `.env` (`ANTHROPIC_API_KEY`), never committed.
+- **Tutor** (`app/tutor.js`, optional): hints and newly generated,
+  verified drills from Claude, using the shared prompts in `docs/tutor/`.
+  Rules in `docs/SHARED-FORMAT.md`, section 6. API key in `.env`
+  (`ANTHROPIC_API_KEY`), never committed.
 
 ## Running it
 - **Mac (now):** `npm start`, open http://localhost:3000.

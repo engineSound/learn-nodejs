@@ -8,12 +8,20 @@ import { listLessons, loadLesson } from './lessons.js';
 import { runLesson } from './runner.js';
 import { appendEvent, readEvents, runPayload, lessonStats } from './history.js';
 import { buildProfile, profileMarkdown, writeProgress } from './profile.js';
+import { tutorStatus, hint, generateDrill, drillTarget, learnerSection, setClientForTests } from './tutor.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LESSONS = path.join(ROOT, 'lessons');
 const WORK = path.join(ROOT, 'data', 'work');
 const EVENTS = process.env.LEARN_EVENTS || path.join(ROOT, 'data', 'events.jsonl');
 const PROGRESS = process.env.LEARN_PROGRESS || path.join(ROOT, 'PROGRESS.md');
+const DATA = path.join(ROOT, 'data');
+
+// ANTHROPIC_API_KEY for the tutor lives in .env (gitignored); see .env.example.
+try { process.loadEnvFile(path.join(ROOT, '.env')); } catch { /* no .env: the tutor stays off unless the key is set elsewhere */ }
+
+// Development only: LEARN_FAKE_TUTOR=<module> replaces the Claude client (default export), for UI checks without a key.
+if (process.env.LEARN_FAKE_TUTOR) setClientForTests((await import(path.resolve(process.env.LEARN_FAKE_TUTOR))).default);
 const PUBLIC = path.join(ROOT, 'app', 'public');
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -57,6 +65,26 @@ function withSlug(next) {
 
 const DIFFICULTIES = new Set(['easy', 'right', 'hard']);
 
+/** What the tutor needs to know about the learner (system prompt). */
+function tutorContext(profile) {
+  let progress = '';
+  try { progress = fs.readFileSync(PROGRESS, 'utf8'); } catch { /* none yet */ }
+  return {
+    docsDir: path.join(ROOT, 'docs'),
+    trackName: 'Node.js',
+    learner: learnerSection(progress),
+    profileMarkdown: profileMarkdown(profile),
+    lessonsDir: LESSONS,
+    dataDir: DATA,
+    track: INFO.track,
+    idPrefix: 'node',
+  };
+}
+
+function parseJson(text) {
+  try { return JSON.parse(text || '{}'); } catch { throw Object.assign(new Error('Body must be JSON'), { status: 400 }); }
+}
+
 function send(res, status, body, type = 'application/json; charset=utf-8') {
   res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store' });
   res.end(type.startsWith('application/json') ? JSON.stringify(body) : body);
@@ -80,7 +108,7 @@ async function handle(req, res) {
   const url = new URL(req.url, 'http://localhost');
   const p = url.pathname;
 
-  if (req.method === 'GET' && p === '/api/info') return send(res, 200, INFO);
+  if (req.method === 'GET' && p === '/api/info') return send(res, 200, { ...INFO, tutor: await tutorStatus() });
   if (req.method === 'GET' && p === '/api/lessons') {
     const events = readEvents(EVENTS);
     const profile = profileOf(events);
@@ -91,7 +119,7 @@ async function handle(req, res) {
     return send(res, 200, { profile, markdown: profileMarkdown(profile), next: withSlug(profile.next) });
   }
 
-  const m = /^\/api\/lessons\/([^/]+)(\/code|\/run|\/feedback)?$/.exec(p);
+  const m = /^\/api\/lessons\/([^/]+)(\/code|\/run|\/feedback|\/hint|\/drill)?$/.exec(p);
   if (m) {
     const lesson = loadLesson(LESSONS, decodeURIComponent(m[1]));
     if (!lesson) return send(res, 404, { error: 'No such lesson' });
@@ -131,6 +159,36 @@ async function handle(req, res) {
       if (!DIFFICULTIES.has(difficulty)) return send(res, 400, { error: 'Rate it easy, right or hard' });
       appendEvent(EVENTS, { track: INFO.track, lesson_id: lesson.meta.id, kind: 'feedback', payload: { difficulty } });
       return send(res, 200, refreshProgress(lesson.meta.id));
+    }
+    if (req.method === 'POST' && action === '/hint') {
+      const { code = '', question = '' } = parseJson(await readBody(req));
+      saveCode(lesson, code);
+      const result = await runLesson(lesson, code);
+      const events = readEvents(EVENTS);
+      const text = await hint(tutorContext(profileOf(events)), {
+        title: lesson.meta.title, lesson: lesson.body, file: lesson.file, code, result, question,
+      });
+      appendEvent(EVENTS, { track: INFO.track, lesson_id: lesson.meta.id, kind: 'hint', payload: { question: question.trim() || null } });
+      return send(res, 200, { hint: text });
+    }
+    if (req.method === 'POST' && action === '/drill') {
+      const all = listLessons(LESSONS);
+      const parentId = (lesson.meta.kind || 'core') === 'core' ? lesson.meta.id : lesson.meta.for;
+      const parentRef = all.find(l => l.id === parentId);
+      if (!parentRef) return send(res, 400, { error: 'This exercise has no core lesson to practise.' });
+      const parent = loadLesson(LESSONS, parentRef.slug);
+      const children = all.filter(l => l.for === parentId);
+      const existing = [parent, ...children.map(c => loadLesson(LESSONS, c.slug))]
+        .map(l => `### ${l.meta.title} (${l.meta.kind || 'core'})\n\n\`\`\`\n${l.starter}\n\`\`\``).join('\n\n');
+      const events = readEvents(EVENTS);
+      const profile = profileOf(events);
+      const made = await generateDrill(tutorContext(profile), {
+        parent: { id: parent.meta.id, slug: parent.slug, title: parent.meta.title, concepts: parent.meta.concepts || [], body: parent.body },
+        existing,
+        target: drillTarget(profile, { id: parent.meta.id, title: parent.meta.title, concepts: parent.meta.concepts || [] }, events, [parentId, ...children.map(c => c.id)]),
+      });
+      appendEvent(EVENTS, { track: INFO.track, lesson_id: made.id, kind: 'generated', payload: { for: parentId, targets: made.targets, attempts: made.attempts } });
+      return send(res, 200, { ...made, ...refreshProgress(made.id) });
     }
     return send(res, 405, { error: 'Method not allowed' });
   }
