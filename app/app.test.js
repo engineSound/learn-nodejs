@@ -21,6 +21,9 @@ test('every lesson has the required front matter and its edit file exists', () =
     const l = loadLesson(LESSONS, slug);
     for (const key of ['id', 'track', 'title', 'minutes', 'concepts', 'edit']) assert.ok(key in l.meta, `${slug} is missing ${key}`);
     assert.equal(l.meta.track, 'nodejs');
+    const kind = l.meta.kind || 'core';
+    assert.ok(['core', 'drill', 'stretch'].includes(kind), `${slug}: unknown kind ${kind}`);
+    if (kind !== 'core') assert.ok(lessons.some(o => o.id === l.meta.for && o.kind === 'core'), `${slug}: "for" must name a core lesson`);
     assert.ok(l.starter.length > 0);
   }
 });
@@ -105,34 +108,23 @@ test('history: append, read back, skip a torn line, compute stats', async () => 
   assert.equal(st.total, 3);
 });
 
-test('profile matches the shared fixture (learn-rust checks the same files)', async () => {
+test('profile matches every shared case (learn-rust checks the same files)', async () => {
   const { buildProfile, profileMarkdown } = await import('./profile.js');
   const dir = path.join(LESSONS, '..', 'docs', 'fixtures');
-  const input = JSON.parse(fs.readFileSync(path.join(dir, 'profile-input.json'), 'utf8'));
-  const profile = buildProfile(input.track, input.lessons, input.events, input.now);
-  assert.deepEqual(profile, JSON.parse(fs.readFileSync(path.join(dir, 'profile-expected.json'), 'utf8')));
-  assert.equal(profileMarkdown(profile) + '\n', fs.readFileSync(path.join(dir, 'profile-expected.md'), 'utf8'));
+  const { cases } = JSON.parse(fs.readFileSync(path.join(dir, 'profile-cases.json'), 'utf8'));
+  assert.ok(cases.length >= 8);
+  for (const c of cases) assert.deepEqual(buildProfile('demo', c.lessons, c.events, c.now), c.expected, c.name);
+  assert.equal(profileMarkdown(cases[0].expected) + '\n', fs.readFileSync(path.join(dir, 'profile-expected.md'), 'utf8'));
 });
 
-test('profile: no events, and a review that passes moves up the schedule', async () => {
+test('profile: a review that passes moves up the schedule', async () => {
   const { buildProfile } = await import('./profile.js');
-  const lessons = [{ id: 'a', title: 'A', concepts: ['c'] }];
-  const empty = buildProfile('t', lessons, [], '2026-01-01T00:00:00.000Z');
-  assert.deepEqual(empty.sessions, { count: 0, streak_days: 0, minutes_total: 0, last_ts: null });
-  assert.deepEqual(empty.next, { kind: 'lesson', lesson_id: 'a', title: 'A', reason: 'next new lesson' });
-  assert.equal(empty.concepts[0].mastery, null);
-
-  const ev = (ts, kind) => ({ ts, lesson_id: 'a', kind, payload: { passed: 1, total: 1, failing: [], errors: [] } });
-  const reviewed = buildProfile('t', lessons, [
-    ev('2026-01-01T10:00:00.000Z', 'pass'), // solved: review in 1 day
-    ev('2026-01-02T11:00:00.000Z', 'pass'), // review 1 passed: next in 3 days
-    ev('2026-01-05T12:00:00.000Z', 'pass'), // review 2 passed: next in 7 days
-  ], '2026-01-06T00:00:00.000Z');
+  const lessons = [{ id: 'a', title: 'A', concepts: ['c'], kind: 'core', for: null }];
+  const ev = ts => ({ ts, lesson_id: 'a', kind: 'pass', payload: { passed: 1, total: 1, failing: [], errors: [] } });
+  const reviewed = buildProfile('t', lessons, [ev('2026-01-01T10:00:00.000Z'), ev('2026-01-02T11:00:00.000Z'), ev('2026-01-05T12:00:00.000Z')], '2026-01-06T00:00:00.000Z');
   assert.equal(reviewed.lessons[0].review_step, 2);
   assert.equal(reviewed.lessons[0].due, '2026-01-12T12:00:00.000Z');
-  assert.equal(reviewed.lessons[0].due_now, false);
   assert.equal(reviewed.concepts[0].mastery, 0.9);
-  assert.deepEqual(reviewed.next, { kind: 'done', lesson_id: null, title: null, reason: 'all lessons solved; next review 2026-01-12' });
 });
 
 test('writeProgress replaces the generated block and keeps the rest', async () => {

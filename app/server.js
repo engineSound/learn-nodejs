@@ -46,8 +46,16 @@ function refreshProgress(lessonId) {
   const events = readEvents(EVENTS);
   const profile = profileOf(events);
   try { writeProgress(PROGRESS, profileMarkdown(profile)); } catch (err) { console.error('could not update PROGRESS.md:', err.message); }
-  return statsFor(events, profile, lessonId);
+  return { stats: statsFor(events, profile, lessonId), next: withSlug(profile.next) };
 }
+
+/** The profile's next step plus the lesson folder (slug) the UI needs to open it. */
+function withSlug(next) {
+  const lesson = next.lesson_id && listLessons(LESSONS).find(l => l.id === next.lesson_id);
+  return { ...next, slug: lesson ? lesson.slug : null };
+}
+
+const DIFFICULTIES = new Set(['easy', 'right', 'hard']);
 
 function send(res, status, body, type = 'application/json; charset=utf-8') {
   res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store' });
@@ -80,10 +88,10 @@ async function handle(req, res) {
   }
   if (req.method === 'GET' && p === '/api/profile') {
     const profile = profileOf(readEvents(EVENTS));
-    return send(res, 200, { profile, markdown: profileMarkdown(profile) });
+    return send(res, 200, { profile, markdown: profileMarkdown(profile), next: withSlug(profile.next) });
   }
 
-  const m = /^\/api\/lessons\/([^/]+)(\/code|\/run)?$/.exec(p);
+  const m = /^\/api\/lessons\/([^/]+)(\/code|\/run|\/feedback)?$/.exec(p);
   if (m) {
     const lesson = loadLesson(LESSONS, decodeURIComponent(m[1]));
     if (!lesson) return send(res, 404, { error: 'No such lesson' });
@@ -102,7 +110,7 @@ async function handle(req, res) {
     if (req.method === 'DELETE' && action === '/code') {
       fs.rmSync(workPath(lesson), { force: true });
       appendEvent(EVENTS, { track: INFO.track, lesson_id: lesson.meta.id, kind: 'reset' });
-      return send(res, 200, { code: lesson.starter, stats: refreshProgress(lesson.meta.id) });
+      return send(res, 200, { code: lesson.starter, ...refreshProgress(lesson.meta.id) });
     }
     if (req.method === 'POST' && action === '/run') {
       const code = await readBody(req);
@@ -116,7 +124,13 @@ async function handle(req, res) {
         duration_ms: result.durationMs,
         payload: runPayload(result, code),
       });
-      return send(res, 200, { ...result, stats: refreshProgress(lesson.meta.id) });
+      return send(res, 200, { ...result, ...refreshProgress(lesson.meta.id) });
+    }
+    if (req.method === 'POST' && action === '/feedback') {
+      const difficulty = (await readBody(req)).trim();
+      if (!DIFFICULTIES.has(difficulty)) return send(res, 400, { error: 'Rate it easy, right or hard' });
+      appendEvent(EVENTS, { track: INFO.track, lesson_id: lesson.meta.id, kind: 'feedback', payload: { difficulty } });
+      return send(res, 200, refreshProgress(lesson.meta.id));
     }
     return send(res, 405, { error: 'Method not allowed' });
   }

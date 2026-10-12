@@ -5,7 +5,8 @@ learner and researcher. **Goal:** general fluency plus backend/APIs.
 **Pace:** short daily sessions (~20 min), under 3 hours a week. Week numbers
 assume that pace; slower is fine.
 
-Lessons contrast with Java first (and Python where that fits better), so
+The order below is the *core* path. The app adapts around it (drills, stretches,
+reviews; see `docs/SHARED-FORMAT.md`, section 5). Lessons contrast with Java first (and Python where that fits better), so
 known ideas go fast and time goes to what's actually different.
 
 ## Learning path
@@ -57,5 +58,6 @@ is the `learn-rust` capstone, so you can compare the two languages directly.
 | M1 ✅ | Website lists lessons; editor; **Run** shows test results in seconds |
 | M2 ✅ | Every run, pass and fail saved to the history log (`data/events.jsonl`) |
 | M3 ✅ | Learner profile generated after each session; review items scheduled |
-| M4 | Tutor: explanations and hints from Claude, aware of your profile |
+| M3.5 ✅ | Adaptive path: reviews with fresh drills, extra drills after a struggle, stretches after an easy win, your own difficulty ratings |
+| M4 | **Tutor (Claude API)**: hints and error explanations in your style; generates new drills aimed at your recurring mistakes, verified against a reference solution before you see them |
 | M5 | Docker; deploy to an existing EC2 instance behind a login |
