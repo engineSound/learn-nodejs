@@ -40,3 +40,23 @@ export function visualProblems(spec) {
   }
   return problems;
 }
+
+const ANATOMY_KINDS = ['keyword', 'name', 'type', 'macro', 'literal', 'symbol', 'operator'];
+
+/** Problems with an ```anatomy spec: each part must be found in the code, in order, and be explained. */
+export function anatomyProblems(spec) {
+  const problems = [];
+  const code = String(spec?.code || '');
+  if (!code) return ['an anatomy needs "code"'];
+  if (!spec.parts?.length) return ['an anatomy needs "parts"'];
+  let at = 0;
+  spec.parts.forEach((p, i) => {
+    const where = `part ${i + 1} (${JSON.stringify(p.text)})`;
+    const found = p.text ? code.indexOf(p.text, at) : -1;
+    if (found < 0) problems.push(`${where} is not in the code after the previous part`);
+    else at = found + p.text.length;
+    if (!p.say) problems.push(`${where} needs "say"`);
+    if (!ANATOMY_KINDS.includes(p.kind)) problems.push(`${where}: kind must be one of ${ANATOMY_KINDS.join(', ')}`);
+  });
+  return problems;
+}

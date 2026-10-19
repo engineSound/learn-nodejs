@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFrontMatter, listLessons, loadLesson } from './lessons.js';
 import { parseTap, runLesson } from './runner.js';
-import { visualProblems } from './visuals.js';
+import { visualProblems, anatomyProblems } from './visuals.js';
 
 const LESSONS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'lessons');
 
@@ -195,7 +195,13 @@ test('every quick-check answer is exactly what the code prints', async () => {
       const answer = field('answer');
       assert.ok(field('options').split('|').map(o => o.trim()).includes(answer), `${slug}: the answer must be one of the options`);
       const r = await runSnippet(m[1]);
-      assert.equal(flat(r.output), flat(answer), `${slug}: the quick check claims different output`);
+      if (/^(throws|doesn't run)/.test(answer)) {
+        // "throws TypeError": it must fail, with that error name if one is given.
+        assert.equal(r.ok, false, `${slug}: the quick check says it fails, but it runs`);
+        for (const name of answer.match(/\w*Error\b/g) || []) assert.match(r.output, new RegExp(name), slug);
+      } else {
+        assert.equal(flat(r.output), flat(answer), `${slug}: the quick check claims different output`);
+      }
       count++;
     }
   }
@@ -214,4 +220,13 @@ test('every run example runs: the learner\'s first try must work', async () => {
     }
   }
   assert.ok(count >= 10, `expected examples in the lessons, found ${count}`);
+});
+
+test('every anatomy block points at real code, in order, and explains each part', () => {
+  for (const { slug } of listLessons(LESSONS)) {
+    const l = loadLesson(LESSONS, slug);
+    for (const m of l.body.matchAll(/```anatomy\n([\s\S]*?)\n```/g)) assert.deepEqual(anatomyProblems(JSON.parse(m[1])), [], slug);
+  }
+  assert.deepEqual(anatomyProblems({ code: 'fn main() {}', parts: [{ text: 'main', kind: 'name', say: 'x' }, { text: 'fn', kind: 'keyword', say: 'y' }] }),
+    ['part 2 ("fn") is not in the code after the previous part']);
 });
